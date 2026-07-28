@@ -1,97 +1,76 @@
-import express from 'express';
-import http from 'http';
-import { Server } from 'socket.io';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import connectDB from './config/db.js';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import authRoutes from './routes/auth.js';
-import playerRoutes from './routes/players.js';
-import roomRoutes from './routes/rooms.js';
-import uploadRoutes from './routes/upload.js';
-import { setupAuctionSocket } from './socket/auctionHandler.js';
-import Player from './models/Player.js';
+import axios from 'axios';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const API_URL = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:5000/api' : 'https://elite-legends-b.onrender.com/api');
 
-dotenv.config();
-
-const app = express();
-const server = http.createServer(app);
-
-const allowedOrigins = [
-  'http://localhost:5173',
-  'https://elitelegends.netlify.app',
-  process.env.CLIENT_URL,
-].filter(Boolean);
-
-const io = new Server(server, {
-  cors: {
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.netlify.app')) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
-    },
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    credentials: true,
-  },
-  pingTimeout: 60000,
-  pingInterval: 25000,
+const api = axios.create({
+  baseURL: API_URL,
+  headers: { 'Content-Type': 'application/json' },
 });
 
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.netlify.app')) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-}));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
-
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-app.use('/players', express.static(path.join(__dirname, 'player-images')));
-app.use('/auth', authRoutes);
-app.use('/api/auth', authRoutes);
-app.use('/players', playerRoutes);
-app.use('/api/players', playerRoutes);
-app.use('/rooms', roomRoutes);
-app.use('/api/rooms', roomRoutes);
-app.use('/upload', uploadRoutes);
-app.use('/api/upload', uploadRoutes);
-
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-setupAuctionSocket(io);
-
-const PORT = process.env.PORT || 5000;
-
-connectDB().then(async () => {
-  try {
-    const result = await Player.updateMany(
-      { imageStatus: { $exists: false } },
-      { $set: { imageStatus: 'pending' } }
-    );
-    if (result.modifiedCount > 0) {
-      console.log(`Migrated ${result.modifiedCount} legacy players with imageStatus: 'pending'`);
-    }
-  } catch (err) {
-    console.error('Migration error:', err.message);
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
   }
-
-  server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`Socket.IO ready for real-time connections`);
-  });
+  return config;
 });
 
-export { app, server, io };
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
+export const authAPI = {
+  register: (data) => api.post('/auth/register', data),
+  login: (data) => api.post('/auth/login', data),
+  getProfile: () => api.get('/auth/profile'),
+  updateProfile: (data) => api.put('/auth/profile', data),
+};
+
+export const playerAPI = {
+  getAll: (params) => api.get('/players', { params }),
+  getById: (id) => api.get(`/players/${id}`),
+  create: (data) => api.post('/players', data),
+  update: (id, data) => api.put(`/players/${id}`, data),
+  delete: (id) => api.delete(`/players/${id}`),
+  bulkUpload: (data) => api.post('/players/bulk', data),
+  exportPlayers: () => api.get('/players/export'),
+  getCountries: () => api.get('/players/countries'),
+  getStats: () => api.get('/players/stats'),
+  uploadImage: (file) => {
+    const formData = new FormData();
+    formData.append('image', file);
+    return api.post('/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  fetchImages: () => api.post('/players/fetch-images'),
+  getImageStats: () => api.get('/players/admin/image-stats'),
+  downloadMissing: () => api.post('/players/admin/download-missing'),
+  retryFailed: () => api.post('/players/admin/retry-failed'),
+  getPlayerImage: (id) => api.get(`/players/${id}/image`),
+};
+
+export const roomAPI = {
+  create: (data) => api.post('/rooms', data),
+  join: (code) => api.post('/rooms/join', { code }),
+  getById: (id) => api.get(`/rooms/${id}`),
+  getMyRooms: () => api.get('/rooms/my-rooms'),
+  updateSettings: (id, data) => api.put(`/rooms/${id}/settings`, data),
+  kickUser: (roomId, userId) => api.delete(`/rooms/${roomId}/kick/${userId}`),
+  transferAdmin: (roomId, userId) => api.put(`/rooms/${roomId}/transfer/${userId}`),
+  getLeaderboard: (id) => api.get(`/rooms/${id}/leaderboard`),
+  getHistory: (id) => api.get(`/rooms/${id}/history`),
+  getMyTeams: () => api.get('/rooms/my/teams'),
+  getMyTeam: (id) => api.get(`/rooms/${id}/my-team`),
+  togglePlayerStatus: (roomId, playerId) => api.put(`/rooms/${roomId}/toggle-status/${playerId}`),
+};
+
+export default api;
