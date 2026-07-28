@@ -1,11 +1,12 @@
 import { io } from 'socket.io-client';
 
 let socket = null;
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || (window.location.hostname === 'localhost' ? window.location.origin : 'https://elite-legends-b.onrender.com');
 
 export const connectSocket = (userId) => {
   if (socket?.connected) return socket;
 
-  socket = io('/', {
+  socket = io(SOCKET_URL, {
     query: { userId },
     transports: ['websocket', 'polling'],
     reconnection: true,
