@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const API_URL = '/api';
+const API_URL = 'https://elite-legends-b.onrender.com';
 
 const api = axios.create({
   baseURL: API_URL,
