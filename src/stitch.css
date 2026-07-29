@@ -772,22 +772,26 @@ body {
 
 /* ===== Player Card (Auction) ===== */
 .player-card-auction {
-  width: 320px;
+  width: min(85vw, 320px);
   aspect-ratio: 2/3;
   position: relative;
-  border-radius: 32px;
+  border-radius: 24px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  padding: 32px;
+  padding: 20px;
   transition: all 0.5s;
+  margin: 0 auto;
 }
 .player-card-auction:hover {
   transform: rotateY(12deg) scale(1.05);
 }
+@media (min-width: 480px) {
+  .player-card-auction { width: min(75vw, 360px); padding: 24px; border-radius: 28px; }
+}
 @media (min-width: 768px) {
-  .player-card-auction { width: 420px; }
+  .player-card-auction { width: 420px; padding: 32px; border-radius: 32px; }
 }
 
 /* ===== Timer ===== */

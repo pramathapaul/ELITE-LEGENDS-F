@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
 import {
   joinRoomSocket, leaveRoomSocket, sendChatMessage,
-  placeBid, startAuction, pauseAuction, resumeAuction, endAuction, assignPlayers, forceSell
+  placeBid, startAuction, pauseAuction, resumeAuction, endAuction, assignPlayers, forceSell, skipPlayer
 } from '../services/socket';
 import Confetti from 'react-confetti';
 import { getPlayerImageUrl } from '../utils/playerImage';
@@ -32,6 +32,8 @@ export default function AuctionRoom() {
   const [bidError, setBidError] = useState(null);
   const [biddingHistory, setBiddingHistory] = useState([]);
   const [myTeam, setMyTeam] = useState(null);
+  const [showSummary, setShowSummary] = useState(false);
+  const [summary, setSummary] = useState(null);
 
   const cardRef = useRef(null);
 
@@ -73,7 +75,12 @@ export default function AuctionRoom() {
     socket.on('auction-started', ({ room: updatedRoom }) => setRoom(updatedRoom));
     socket.on('auction-paused', ({ room: updatedRoom }) => setRoom(updatedRoom));
     socket.on('auction-resumed', ({ room: updatedRoom }) => setRoom(updatedRoom));
-    socket.on('auction-ended', ({ room: updatedRoom }) => setRoom(updatedRoom));
+    socket.on('auction-ended', ({ room: updatedRoom }) => { setRoom(updatedRoom); });
+    socket.on('auction-summary-open', ({ room: updatedRoom }) => {
+      setRoom(updatedRoom);
+      setShowSummary(true);
+      roomAPI.getSummary(id).then(({ data }) => setSummary(data)).catch(() => {});
+    });
     socket.on('players-assigned', ({ room: updatedRoom }) => { setRoom(updatedRoom); setAssigning(false); });
     socket.on('user-joined', ({ message }) => setChatMessages((prev) => [...prev, { username: 'System', message, type: 'system' }]));
     socket.on('user-left', ({ message }) => setChatMessages((prev) => [...prev, { username: 'System', message, type: 'system' }]));
@@ -82,7 +89,7 @@ export default function AuctionRoom() {
 
     return () => {
       leaveRoomSocket(id, user);
-      ['new-bid','new-chat-message','new-player-auction','timer-tick','timer-reset','player-sold','player-unsold','auction-started','auction-paused','auction-resumed','auction-ended','players-assigned','user-joined','user-left','error','bid-rejected'].forEach(e => socket.off(e));
+      ['new-bid','new-chat-message','new-player-auction','timer-tick','timer-reset','player-sold','player-unsold','auction-started','auction-paused','auction-resumed','auction-ended','auction-summary-open','players-assigned','user-joined','user-left','error','bid-rejected'].forEach(e => socket.off(e));
     };
   }, [socket, room?._id]);
 
@@ -154,6 +161,83 @@ export default function AuctionRoom() {
   if (loading) return <div className="loading-stitch"><div className="spinner-stitch"></div></div>;
   if (!room) return null;
 
+  if (showSummary && summary) {
+    return (
+      <div className="space-y-8">
+        <div className="squad-header-banner text-center">
+          <span className="bg-primary text-on-primary px-4 py-1.5 font-label-caps text-[10px] rounded-full tracking-wider">AUCTION COMPLETE</span>
+          <h1 className="font-headline-xl text-primary italic tracking-tight mt-4" style={{fontSize: 'clamp(28px, 5vw, 48px)'}}>
+            {summary.room.name}
+          </h1>
+          <p className="text-on-surface-variant font-body-md mt-2">
+            {summary.totalPlayersSold} players sold · ${(summary.totalRevenue / 1000000).toFixed(0)}M total revenue · {summary.totalUnsold} unsold
+          </p>
+        </div>
+
+        <div className="glass-panel p-6 md:p-8 rounded-xl">
+          <h3 className="font-headline-lg text-primary mb-6">FINAL LEADERBOARD</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left" style={{borderCollapse: 'collapse'}}>
+              <thead>
+                <tr className="font-label-caps text-[10px] text-on-surface-variant border-b tracking-wider" style={{borderColor: 'rgba(77,70,53,0.2)'}}>
+                  <th className="px-4 py-3">#</th>
+                  <th className="px-4 py-3">Team</th>
+                  <th className="px-4 py-3 text-right">XI</th>
+                  <th className="px-4 py-3 text-right">Sub</th>
+                  <th className="px-4 py-3 text-right">Rating</th>
+                  <th className="px-4 py-3 text-right">Avg</th>
+                  <th className="px-4 py-3 text-right">Spent</th>
+                  <th className="px-4 py-3 text-right">Value</th>
+                  <th className="px-4 py-3 text-right">Budget</th>
+                  <th className="px-4 py-3 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.teams.map((entry, i) => (
+                  <tr key={i} className="border-b hover:bg-surface-container-low transition-colors" style={{borderColor: 'rgba(77,70,53,0.08)'}}>
+                    <td className="px-4 py-4">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-label-caps text-xs font-bold ${
+                        i === 0 ? 'bg-primary text-on-primary' : i === 1 ? 'bg-surface-container-highest' : i === 2 ? 'bg-surface-container' : 'bg-surface-container-low text-on-surface-variant'
+                      }`}>{i + 1}</div>
+                    </td>
+                    <td className="px-4 py-4 font-headline-sm text-sm text-on-surface">{entry.user?.username}</td>
+                    <td className="px-4 py-4 text-right text-secondary-fixed font-bold">{entry.starters}/11</td>
+                    <td className="px-4 py-4 text-right text-on-surface-variant">{entry.substitutes}/11</td>
+                    <td className="px-4 py-4 text-right text-primary font-bold">{entry.totalRating}</td>
+                    <td className="px-4 py-4 text-right text-on-surface-variant">{entry.avgRating}</td>
+                    <td className="px-4 py-4 text-right text-on-surface-variant">{formatMoney(entry.totalSpent)}</td>
+                    <td className="px-4 py-4 text-right text-secondary-fixed">{formatMoney(entry.squadValue)}</td>
+                    <td className="px-4 py-4 text-right text-on-surface-variant">{formatMoney(entry.budget)}</td>
+                    <td className="px-4 py-4 text-center">
+                      {entry.squadConfirmed ? (
+                        <span className="text-secondary-fixed font-label-caps text-[10px]">CONFIRMED</span>
+                      ) : (
+                        <span className="text-warning font-label-caps text-[10px]">PENDING</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <button className="btn-primary-glow" style={{fontSize: '14px', padding: '14px 28px', borderRadius: '10px'}}
+            onClick={() => navigate(`/room/${id}/manage`)}>
+            MANAGE YOUR SQUAD
+          </button>
+          <button className="btn-outline-glass" style={{borderRadius: '10px', padding: '14px 28px'}}
+            onClick={() => navigate('/dashboard')}>
+            BACK TO DASHBOARD
+          </button>
+        </div>
+
+        <style>{`.squad-header-banner { background: rgba(53, 53, 52, 0.4); backdrop-filter: blur(12px); border: 1px solid rgba(77, 70, 53, 0.3); padding: 32px; border-radius: 0.75rem; }`}</style>
+      </div>
+    );
+  }
+
   return (
     <>
       {showConfetti && <Confetti width={window.innerWidth} height={window.innerHeight} recycle={false} numberOfPieces={200} colors={['#f2ca50', '#e9c349', '#72ff70', '#fff']} />}
@@ -161,7 +245,7 @@ export default function AuctionRoom() {
       {soldNotification && (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-40" style={{animation: 'slideUp 0.4s ease-out'}}>
           <div className="bg-secondary text-on-secondary px-8 py-4 rounded-lg shadow-xl text-center" style={{boxShadow: '0 0 40px rgba(114,255,112,0.3)'}}>
-            <h3 className="font-headline-lg text-2xl font-black italic">⚡ SOLD! ⚡</h3>
+            <h3 className="font-headline-lg text-2xl font-black italic">SOLD!</h3>
             <p className="font-headline-sm text-lg">{soldNotification.player?.name}</p>
             <p className="font-label-price text-2xl">{formatMoney(soldNotification.winningBid)}</p>
             <p className="font-label-caps text-sm opacity-80">Won by {soldNotification.winner?.username || 'Unknown'}</p>
@@ -182,13 +266,25 @@ export default function AuctionRoom() {
         </div>
       )}
 
+      {room.status === 'ended' && room.phase === 'team_management' && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50" style={{animation: 'slideUp 0.5s ease-out'}}>
+          <div className="glass-panel p-4 rounded-xl flex items-center gap-6 shadow-2xl" style={{border: '1px solid var(--primary)'}}>
+            <span className="font-body-md text-on-surface">Auction ended! Build your squad now.</span>
+            <button className="bg-primary text-on-primary font-label-caps px-6 py-3 rounded-lg transition-all hover:brightness-110 active:scale-95" style={{border: 'none'}}
+              onClick={() => navigate(`/room/${id}/manage`)}>
+              MANAGE SQUAD
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col xl:grid xl:grid-cols-12 gap-6 lg:gap-10">
         {/* Left: Participants + Chat */}
         <div className="xl:col-span-3 space-y-6 lg:space-y-8 order-3 xl:order-none">
           <div>
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-label-caps text-on-surface-variant tracking-wider">ROOM PARTICIPANTS</h3>
-              <span className="font-label-caps text-primary">{room.participants?.length || 0}/{room.settings?.maxParticipants || '∞'}</span>
+              <span className="font-label-caps text-primary">{room.participants?.length || 0}/{room.settings?.maxParticipants || ''}</span>
             </div>
             <div className="mb-5 font-label-caps text-[10px] text-primary/60 tracking-widest" style={{letterSpacing: '2px'}}>
               ROOM CODE: <span className="text-primary font-bold text-xs tracking-widest">{room.code}</span>
@@ -262,8 +358,8 @@ export default function AuctionRoom() {
                   backgroundClip: 'padding-box, border-box',
                 }}>
                   <img src={getPlayerImageUrl(currentPlayer)} alt={currentPlayer.name}
-                    className="absolute -top-8 lg:-top-12 left-1/2 -translate-x-1/2 w-[120%] lg:w-[140%] h-[100%] lg:h-[120%] z-10 object-contain opacity-30 pointer-events-none select-none"
-                    style={{filter: 'grayscale(0.3)', objectPosition: 'center'}} />
+                    className="absolute inset-0 w-full h-full z-10 object-cover opacity-30 pointer-events-none select-none"
+                    style={{filter: 'grayscale(0.3)'}} />
                   <div className="relative z-20 space-y-2 lg:space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="font-display-lg text-display-lg-mobile text-primary-fixed-dim leading-none">{currentPlayer.overall}</span>
@@ -272,7 +368,7 @@ export default function AuctionRoom() {
                       </span>
                     </div>
                     <h2 className="font-headline-lg lg:font-headline-xl leading-none italic uppercase tracking-tight" style={{marginLeft: '-2px'}}>
-                      {currentPlayer.name?.split(' ').pop() || 'PLAYER'}
+                      {currentPlayer.name || 'PLAYER'}
                     </h2>
                     <div className="flex gap-4 lg:gap-6 pt-4 lg:pt-5 mt-4 lg:mt-5" style={{borderTop: '1px solid rgba(242,202,80,0.2)'}}>
                       <div className="text-center">
@@ -326,6 +422,10 @@ export default function AuctionRoom() {
                       </button>
                     )}
                   </div>
+                  <button className="w-full py-3 mt-3 bg-surface-container-highest text-on-surface font-label-caps text-xs border border-outline-variant transition-all active:scale-95 hover:bg-surface-container-high rounded-lg" style={{border: '1px solid var(--text-outline-variant)'}}
+                    onClick={() => skipPlayer(id)}>
+                    SKIP PLAYER
+                  </button>
                   <div className="flex justify-between font-label-caps text-[11px] text-on-surface-variant pt-2" style={{borderTop: '1px solid rgba(77,70,53,0.15)'}}>
                     <span>Budget: <span className="text-secondary-fixed font-bold">{formatMoney(myBudget)}</span></span>
                     <span>Next bid: <span className="text-primary font-bold">{formatMoney(getNextBid())}</span></span>
@@ -345,7 +445,7 @@ export default function AuctionRoom() {
               <p className="text-on-surface-variant opacity-60 font-body-lg max-w-md mx-auto">
                 {room.status === 'waiting'
                   ? (hasPlayers ? 'The admin will start the auction shortly.' : 'Admin needs to assign players first.')
-                  : room.status === 'ended' ? 'Check the leaderboard for final results.' : ''}
+                  : room.status === 'ended' ? 'Proceed to squad management to build your team.' : ''}
               </p>
               {isAdmin && room.status === 'waiting' && (
                 <div className="flex gap-4 justify-center mt-8">
@@ -359,14 +459,22 @@ export default function AuctionRoom() {
                   )}
                 </div>
               )}
-              {isAdmin && room.status === 'active' && (
+              {room.status === 'active' && (
                 <div className="flex gap-4 justify-center mt-8">
-                  <button className="btn-outline-glass" style={{borderRadius: '10px'}} onClick={() => pauseAuction(id)}>PAUSE</button>
-                  <button className="btn-outline-glass" style={{borderRadius: '10px'}} onClick={() => endAuction(id)}>END</button>
+                  <button className="btn-outline-glass" style={{borderRadius: '10px'}} onClick={() => skipPlayer(id)}>SKIP</button>
+                  {isAdmin && <button className="btn-outline-glass" style={{borderRadius: '10px'}} onClick={() => pauseAuction(id)}>PAUSE</button>}
+                  {isAdmin && <button className="btn-outline-glass" style={{borderRadius: '10px'}} onClick={() => endAuction(id)}>END</button>}
                 </div>
               )}
               {isAdmin && room.status === 'paused' && (
                 <button className="btn-primary-glow mt-8" style={{fontSize: '14px', padding: '14px 28px', borderRadius: '10px'}} onClick={() => resumeAuction(id)}>RESUME</button>
+              )}
+              {room.status === 'ended' && (
+                <div className="flex gap-4 justify-center mt-8">
+                  <button className="btn-primary-glow" style={{fontSize: '14px', padding: '14px 28px', borderRadius: '10px'}} onClick={() => navigate(`/room/${id}/manage`)}>
+                    MANAGE SQUAD
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -477,6 +585,8 @@ export default function AuctionRoom() {
                 {room.status === 'active' && (
                   <>
                     <button className="w-full py-4 bg-surface-container-highest text-on-surface font-label-caps text-xs border border-outline-variant transition-all active:scale-95 hover:bg-surface-container-high rounded-lg"
+                      onClick={() => skipPlayer(id)}>SKIP PLAYER</button>
+                    <button className="w-full py-4 bg-surface-container-highest text-on-surface font-label-caps text-xs border border-outline-variant transition-all active:scale-95 hover:bg-surface-container-high rounded-lg"
                       onClick={() => pauseAuction(id)}>PAUSE AUCTION</button>
                     <button className="w-full py-4 bg-error/20 text-error font-label-caps text-xs border border-error/30 transition-all active:scale-95 hover:bg-error/30 rounded-lg"
                       onClick={() => endAuction(id)}>END AUCTION</button>
@@ -501,6 +611,9 @@ export default function AuctionRoom() {
               </h4>
               {myTeam && (
                 <div className="flex items-center gap-3">
+                  {myTeam.manager && (
+                    <span className="font-label-caps text-[10px] text-primary">{myTeam.manager?.name || ''}</span>
+                  )}
                   <span className="font-label-caps text-[10px] text-secondary-fixed">{myTeam.formation}</span>
                   <span className="font-label-caps text-[10px] text-on-surface-variant">
                     {myTeam.players.filter(p => p.status === 'starter').length}/11
@@ -510,65 +623,28 @@ export default function AuctionRoom() {
             </div>
 
             {myTeam && myTeam.players.length > 0 ? (
-              <div className="space-y-3">
-                {/* Starting XI */}
-                {['Goalkeeper', 'Defender', 'Midfielder', 'Forward'].map(position => {
-                  const posPlayers = myTeam.players.filter(p => p.status === 'starter' && p.player?.position === position);
-                  if (posPlayers.length === 0) return null;
-                  return (
-                    <div key={position}>
-                      <p className="font-label-caps text-[9px] text-on-surface-variant mb-2 tracking-wider uppercase">
-                        {position === 'Goalkeeper' ? 'GK' : position === 'Defender' ? 'DEF' : position === 'Midfielder' ? 'MID' : 'FWD'}
-                        <span className="ml-2 opacity-40">• {posPlayers.length}</span>
-                      </p>
-                      <div className="space-y-1.5">
-                        {posPlayers.map(entry => (
-                          <div key={entry.player._id} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-surface-container-low hover:bg-surface-container-highest transition-colors cursor-pointer"
-                            onClick={() => roomAPI.togglePlayerStatus(id, entry.player._id).then(({ data }) => setMyTeam(data)).catch(() => {})}
-                            title={entry.status === 'starter' ? 'Move to bench' : 'Promote to starter'}>
-                            <div className="w-7 h-7 rounded-full bg-surface-container-highest overflow-hidden shrink-0 flex items-center justify-center">
-                              <img src={getPlayerImageUrl(entry.player)} alt="" className="w-full h-full object-cover" />
-                            </div>
-                            <span className="font-body-md text-xs text-on-surface truncate flex-1 min-w-0">
-                              {entry.player.name}
-                            </span>
-                            <span className="font-label-caps text-[9px] text-primary">{entry.player.overall}</span>
-                            <span className={`w-2 h-2 rounded-full shrink-0 ${entry.status === 'starter' ? 'bg-secondary-fixed' : 'bg-on-surface-variant/40'}`}></span>
-                          </div>
-                        ))}
-                      </div>
+              <div className="space-y-1">
+                {myTeam.players.map(entry => (
+                  <div key={entry.player._id} className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-surface-container-low hover:bg-surface-container-highest transition-colors cursor-pointer"
+                    onClick={() => roomAPI.togglePlayerStatus(id, entry.player._id).then(({ data }) => setMyTeam(data)).catch(() => {})}
+                    title={entry.status === 'starter' ? 'Move to bench' : 'Promote to starter'}>
+                    <div className="w-5 h-5 rounded-full bg-surface-container-highest overflow-hidden shrink-0 flex items-center justify-center">
+                      <img src={getPlayerImageUrl(entry.player)} alt="" className="w-full h-full object-cover" />
                     </div>
-                  );
-                })}
-
-                {/* Bench */}
-                {(() => {
-                  const subs = myTeam.players.filter(p => p.status === 'substitute');
-                  if (subs.length === 0) return null;
-                  return (
-                    <div className="pt-3" style={{borderTop: '1px solid rgba(77,70,53,0.15)'}}>
-                      <p className="font-label-caps text-[9px] text-on-surface-variant mb-2 tracking-wider uppercase">
-                        BENCH <span className="ml-2 opacity-40">• {subs.length}</span>
-                      </p>
-                      <div className="space-y-1.5">
-                        {subs.map(entry => (
-                          <div key={entry.player._id} className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-surface-container-low hover:bg-surface-container-highest transition-colors cursor-pointer"
-                            onClick={() => roomAPI.togglePlayerStatus(id, entry.player._id).then(({ data }) => setMyTeam(data)).catch(() => {})}
-                            title={entry.status === 'starter' ? 'Move to bench' : 'Promote to starter'}>
-                            <div className="w-7 h-7 rounded-full bg-surface-container-highest overflow-hidden shrink-0 flex items-center justify-center">
-                              <img src={getPlayerImageUrl(entry.player)} alt="" className="w-full h-full object-cover" />
-                            </div>
-                            <span className="font-body-md text-xs text-on-surface truncate flex-1 min-w-0">
-                              {entry.player.name}
-                            </span>
-                            <span className="font-label-caps text-[9px] text-on-surface-variant">{entry.player.overall}</span>
-                            <span className="w-2 h-2 rounded-full shrink-0 bg-on-surface-variant/40"></span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
+                    <span className="font-body-md text-[11px] text-on-surface truncate flex-1 min-w-0 max-w-[100px]">
+                      {entry.player.name}
+                    </span>
+                    <span className="font-label-caps text-[9px] text-on-surface-variant shrink-0">{entry.player.position === 'Goalkeeper' ? 'GK' : entry.player.position === 'Defender' ? 'DEF' : entry.player.position === 'Midfielder' ? 'MID' : 'FWD'}</span>
+                    <span className="font-label-caps text-[9px] text-primary shrink-0">{entry.player.overall}</span>
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${entry.status === 'starter' ? 'bg-secondary-fixed' : 'bg-on-surface-variant/40'}`}></span>
+                  </div>
+                ))}
+                <button onClick={() => navigate(`/room/${id}/manage`)}
+                  className="w-full mt-2 py-2.5 bg-primary/10 hover:bg-primary/20 text-primary font-label-caps text-[10px] tracking-wider rounded-lg transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                  style={{border: '1px solid rgba(242,202,80,0.15)'}}>
+                  <span className="material-symbols-outlined" style={{fontSize: '12px'}}>swap_vert</span>
+                  MANAGE SQUAD
+                </button>
               </div>
             ) : (
               <p className="text-on-surface-variant opacity-50 font-body-md text-sm text-center py-6">

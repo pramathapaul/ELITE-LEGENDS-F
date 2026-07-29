@@ -12,6 +12,7 @@ import Profile from './pages/Profile';
 import PlayerDatabase from './pages/PlayerDatabase';
 import AuctionHistory from './pages/AuctionHistory';
 import AdminPlayers from './pages/AdminPlayers';
+import SquadBuilder from './pages/SquadBuilder';
 
 const ProtectedRoute = ({ children }) => {
   const { user, loading } = useAuth();
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="profile" element={<Profile />} />
         <Route path="players" element={<PlayerDatabase />} />
         <Route path="history/:roomId" element={<AuctionHistory />} />
+        <Route path="room/:id/manage" element={<SquadBuilder />} />
         <Route path="admin/players" element={<AdminPlayers />} />
       </Route>
     </Routes>

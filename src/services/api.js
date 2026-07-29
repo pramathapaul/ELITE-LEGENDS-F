@@ -71,6 +71,15 @@ export const roomAPI = {
   getMyTeams: () => api.get('/rooms/my/teams'),
   getMyTeam: (id) => api.get(`/rooms/${id}/my-team`),
   togglePlayerStatus: (roomId, playerId) => api.put(`/rooms/${roomId}/toggle-status/${playerId}`),
+  setManager: (roomId, managerId) => api.put(`/rooms/${roomId}/manager`, { managerId }),
+  setFormation: (roomId, formation) => api.put(`/rooms/${roomId}/formation`, { formation }),
+  confirmSquad: (roomId) => api.post(`/rooms/${roomId}/confirm-squad`),
+  getManagers: () => api.get('/rooms/managers'),
+  getBestXI: (roomId) => api.get(`/rooms/${roomId}/best-xi`),
+  applyBestXI: (roomId) => api.post(`/rooms/${roomId}/apply-best-xi`),
+  getSummary: (roomId) => api.get(`/rooms/${roomId}/summary`),
+  reorderPlayers: (roomId, statusType, playerIds) => api.put(`/rooms/${roomId}/reorder-players`, { statusType, playerIds }),
+  resetTeam: (roomId) => api.post(`/rooms/${roomId}/reset-team`),
 };
 
 export default api;

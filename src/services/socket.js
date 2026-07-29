@@ -77,3 +77,7 @@ export const assignPlayers = (roomId) => {
 export const forceSell = (roomId, user) => {
   socket?.emit('force-sell', { roomId, user });
 };
+
+export const skipPlayer = (roomId) => {
+  socket?.emit('skip-player', { roomId });
+};
